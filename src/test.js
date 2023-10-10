@@ -46,7 +46,8 @@ function createASTs(folder){
                     console.log(ASTs.pop().rootNode.toString());
                 
                 }else if(stat.isDirectory()){
-                    //recursive call to find any files in folders
+                    //since the current path is a directory
+                    //it needs to be checked it contains any files
                     createASTs(currentPath);
                 }
             });

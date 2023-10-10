@@ -1,4 +1,4 @@
-class DependencyGraph{
+class PlanGraph{
     constructor(){
         //keep track of adjacent nodes
         this.adjList = new Map();
@@ -11,11 +11,9 @@ class DependencyGraph{
         this.adjList.set(n,[]);
     }
 
-    //dependency graph is undirected
-    addEdge(n, nn, relation1, relation2){
+    //plan graph is directed
+    addEdge(n, nn, relation){
         this.AdjList.get(n).push(nn);
-        this.AdjList.get(nn).push(n);
-        this.edgeRelations.set(n, [nn, relation1]);
-        this.edgeRelations.set(nn, [n, relation2]);
+        this.edgeRelations.set(n, [nn, relation]);
     }
 }
