@@ -1,5 +1,4 @@
 const Parser = require('tree-sitter');
-//add more language parsers later
 const JavaScript = require('tree-sitter-javascript');
 const fs = require('fs');
 const path = require('path');
@@ -43,7 +42,7 @@ function createASTs(folder){
                     //create ast and push ast array
                     ASTs.push(parser.parse(sourceCode));
                     console.log("'%s' AST has been added to AST list.", currentPath);
-                    console.log(ASTs.pop().rootNode.toString());
+                    console.log(ASTs.pop().rootNode);
                 
                 }else if(stat.isDirectory()){
                     //since the current path is a directory

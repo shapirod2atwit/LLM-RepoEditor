@@ -10,6 +10,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "dependency-tree": "^10.0.9",
     "fs": "^0.0.1-security",
     "path": "^0.12.7",
     "tree-sitter": "^0.20.5",
