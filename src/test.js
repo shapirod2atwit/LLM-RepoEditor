@@ -1,16 +1,16 @@
 const Parser = require('tree-sitter');
-const JavaScript = require('tree-sitter-javascript');
+const csharp = require('tree-sitter-c-sharp');
 const fs = require('fs');
 const path = require('path');
 
 const parser = new Parser();
-parser.setLanguage(JavaScript);
+parser.setLanguage(csharp);
 
 //arr to store all abstract syntax trees
 var ASTs = [];
 
 //put the path to the repository here
-const target = "./src";
+const target = "./TestFiles";//currently learning what nodes are called for later parsing
 
 createASTs(target);
 
@@ -36,13 +36,16 @@ function createASTs(folder){
                 }
         
                 //only check for js files right now
-                if (stat.isFile() && type==".js"){
+                if (stat.isFile() && type==".cs"){
                     //convert file to string
                     var sourceCode = fs.readFileSync(currentPath).toString();
                     //create ast and push ast array
                     ASTs.push(parser.parse(sourceCode));
-                    console.log("'%s' AST has been added to AST list.", currentPath);
-                    console.log(ASTs.pop().rootNode);
+                    //console.log("'%s' AST has been added to AST list.", currentPath);
+                    if(currentPath === 'TestFiles\\test1.cs'){
+                        var tree = ASTs.pop();
+                        traverseTree(tree.rootNode, processNode);
+                    }
                 
                 }else if(stat.isDirectory()){
                     //since the current path is a directory
@@ -53,3 +56,20 @@ function createASTs(folder){
         });
     });
 }
+
+
+function traverseTree(node, callback) {
+    // Call the callback function on the current node
+    callback(node);
+  
+    // Recursively traverse child nodes
+    for (let i = 0; i < node.childCount; i++) {
+      traverseTree(node.child(i), callback);
+    }
+  }
+  
+  //callback function
+  function processNode(node) {
+    //print node if not a syntax node
+    console.log(node);
+  }

@@ -44,6 +44,8 @@ function parseJavaScriptFile(filePath) {
     dependencies.push(importPath);
   });
 
+  //class_heritage, call_expression 
+  //method_definition
   return dependencies;
 }
 
