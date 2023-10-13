@@ -44,7 +44,31 @@ function parseJavaScriptFile(filePath) {
     dependencies.push(importPath);
   });
 
-  //class_heritage, call_expression 
+  // Search for inherited classes in the abstract syntax tree (AST)
+  tree.rootNode.descendantsOfType('class_heritage').forEach((node) => {
+    const importPath = node.text.replace(/['"]/g, '');
+    dependencies.push(importPath);
+  });
+
+  // Search for method calls in the abstract syntax tree (AST)
+  tree.rootNode.descendantsOfType('call_expression').forEach((node) => {
+    const importPath = node.text.replace(/['"]/g, '');
+    dependencies.push(importPath);
+  });
+
+  // Search for method invocations in the abstract syntax tree (AST)
+  tree.rootNode.descendantsOfType('invocation_expression').forEach((node) => {
+    const importPath = node.text.replace(/['"]/g, '');
+    dependencies.push(importPath);
+  });
+
+  // Search for field use relations in the abstract syntax tree (AST)
+  tree.rootNode.descendantsOfType('element_access_expression').forEach((node) => {
+    const importPath = node.text.replace(/['"]/g, '');
+    dependencies.push(importPath);
+  });
+
+  //class_heritage, call_expression, invocation_expression, element_access_expression
   //method_definition
   return dependencies;
 }

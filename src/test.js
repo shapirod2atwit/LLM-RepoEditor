@@ -12,6 +12,9 @@ var ASTs = [];
 //put the path to the repository here
 const target = "./TestFiles";//currently learning what nodes are called for later parsing
 
+//output path
+const oPath = "./TestFiles/output.txt";
+
 createASTs(target);
 
 function createASTs(folder){
@@ -42,7 +45,7 @@ function createASTs(folder){
                     //create ast and push ast array
                     ASTs.push(parser.parse(sourceCode));
                     //console.log("'%s' AST has been added to AST list.", currentPath);
-                    if(currentPath === 'TestFiles\\test1.cs'){
+                    if(currentPath === 'TestFiles\\test2.cs'){
                         var tree = ASTs.pop();
                         traverseTree(tree.rootNode, processNode);
                     }
@@ -70,6 +73,11 @@ function traverseTree(node, callback) {
   
   //callback function
   function processNode(node) {
-    //print node if not a syntax node
     console.log(node);
+    //write to output file
+    fs.writeFile(oPath, node.toString(), (err) => {
+        if (err) {
+          console.error('Error writing to the file:', err);
+        }
+      });
   }
