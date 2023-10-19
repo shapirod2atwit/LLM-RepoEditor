@@ -1,9 +1,13 @@
 using System;
 
+
+// Your replacement function code here
+
 // Step 1: Importing a class
 using System.Collections.Generic;
 
 // Step 6: Inheriting from another class
+
 class BaseClass
 {
     public void BaseMethod()
