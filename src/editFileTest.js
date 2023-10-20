@@ -1,4 +1,4 @@
-const fs = require('fs');
+import * as fs from 'fs';
 
 // Define the source file, old function, and new function content
 const sourceFile = './TestFiles/test2.cs';

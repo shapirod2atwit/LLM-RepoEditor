@@ -8,11 +8,10 @@ using System.Collections.Generic;
 
 // Step 6: Inheriting from another class
 
-class BaseClass
-{
-    public void BaseMethod()
-    {
-        Console.WriteLine("BaseClass's BaseMethod");
+
+class BaseClass{
+    public void BaseMethod(){
+        Console.WriteLine("base method");
     }
 }
 
