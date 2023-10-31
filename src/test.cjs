@@ -73,7 +73,10 @@ function traverseTree(node, callback) {
   
   //callback function
   function processNode(node) {
-    console.log(node);
+    if(node.childCount != 0){
+        console.log(node);
+    }
+    
     //write to output file
     fs.writeFile(oPath, node.toString(), (err) => {
         if (err) {

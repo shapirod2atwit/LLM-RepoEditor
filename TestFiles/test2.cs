@@ -10,6 +10,7 @@ using System.Collections.Generic;
 
 
 class BaseClass{
+    public int value = 1;
     public void BaseMethod(){
         Console.WriteLine("base method");
     }
@@ -30,6 +31,7 @@ class Program
     {
         // Step 2: Overriding a method
         DerivedClass derived = new DerivedClass();
+        
         derived.BaseMethod(); // Calls overridden method in DerivedClass
 
         // Step 4: Instantiating an object
@@ -38,5 +40,11 @@ class Program
 
         // Step 5: Using a field from another class
         Console.WriteLine(myList[0]);
+        int val = derived.value;
+        int x = check();
+    }
+
+    public static int check(){
+        return 0;
     }
 }
