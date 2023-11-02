@@ -76,25 +76,58 @@ function findRelationships(hold){
   //(key => file path) (value => object holding map)
   hold.forEach((value1, key1) => {
     //(key => relationship) (value => array of code blocks)
-    value1.blocks.forEach((value2, key2) => {
-      if(key2 != [relations.Calledby] && key2 != [relations.InstantiatedBy] && key2 != [relations.UsedBy]){
+    for(const relation in value1.blocks){
+      if(relation != [relations.Calledby] && relation != [relations.InstantiatedBy] && relation != [relations.UsedBy]){
 
-        for(var i = 0; i < value2.length; i++){
+        for(var i = 0; i < relation.length; i++){
 
-          if(key2 == [relations.Calls]){
+          if(relation == [relations.Calls]){
             hold.forEach((value3, key3) => {
-              value3.blocks.forEach((value4, key4) =>{
-
-              });
+              //***implement case for key1 == key3 later in plan graph */
+              if(key3 != key1){
+                for(const relation2 in value3.blocks){
+                  if(relation2 == [relations.Calledby]){
+                    if(isOrigin(key3, relation[i], 'm')){
+                      //graph is bidirectional
+                      dependencyGraph.get(key1).blocks[relation].push(key3);
+                      dependencyGraph.get(key3).block[relation2].push(key1);
+                    }
+                  }
+                }
+              }
             });
-          }else if(key2 == [relations.Instantiates]){
-
-          }else{
-
+          }else if(relation == [relations.Instantiates]){
+            hold.forEach((value3, key3) => {
+              //***implement case for key1 == key3 later in plan graph */
+              if(key3 != key1){
+                for(const relation2 in value3.blocks){
+                  if(relation2 == [relations.InstantiatedBy]){
+                    if(isOrigin(key3, relation[i], 'm')){
+                      dependencyGraph.get(key1).blocks[relation].push(key3);
+                      dependencyGraph.get(key3).block[relation2].push(key1);
+                    }
+                  }
+                }
+              }
+            });
+          }else if (relation == [relations.Uses]){
+            hold.forEach((value3, key3) => {
+              //***implement case for key1 == key3 later in plan graph */
+              if(key3 != key1){
+                for(const relation2 in value3.blocks){
+                  if(relation2 == [relations.UsedBy]){
+                    if(isOrigin(key3, relation[i], 'm')){
+                      dependencyGraph.get(key1).blocks[relation].push(key3);
+                      dependencyGraph.get(key3).block[relation2].push(key1);
+                    }
+                  }
+                }
+              }
+            });
           }
         }
       }
-    });
+    }
   });  
 }
 
@@ -117,6 +150,7 @@ function findSignificantBlocks(forest){
 
   forest.forEach((value, key) => {
     hold.set(key, new codeBlocks());
+    dependencyGraph.set(key, new codeBlocks());
 
     //****will add searches for more types once corresponding source nodes are found */
     // value.rootNode.descendantsOfType('import_statement').forEach((node) => {
@@ -223,61 +257,61 @@ fs.readFile(file, 'utf-8', (err, data) => {
 }
 
 
-/*implement*/
 //find if codeblock is in the file
-function isOrigin(file, block){
-  fs.readFile(file, 'utf-8', (err, data) => {
-    if (err) {
-      console.error('Error reading the file:', err);
-      return;
-    }
-  
-    // Split the old block and new block into lines
-    const oldLines = oldBlock.split('\n');
-    const newLines = newBlock.split('\n');
-  
-    // Iterate through the lines in the file
-    const lines = data.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].trim() === oldLines[0].trim()) {
-        let match = true;
-        for (let j = 1; j < oldLines.length; j++) {
-          if (!lines[i + j] || !areLinesEqualIgnoringSemicolons(lines[i + j], oldLines[j].trim())) {
-            match = false;
-            break;
-          }
-        }
-    
-        if (match) {
-          // Replace the old function with the new function
-          lines.splice(i, oldLines.length, ...newLines);
-          i += newLines.length - 1;
-        }
+function isOrigin(file, block, type){
+
+  try{
+    const fileContent = fs.readFileSync(file, 'utf-8');
+
+    //method parse
+    if(type == 'm'){
+      //if an invocation, only take method name
+      if(block.includes('.')){
+        const parts = block.split('.');
+        block = parts[1];
+      }
+
+      const methodRegex = new RegExp(`\\s+${block}\\s*\\(`);
+
+      if (methodRegex.test(fileContent)) {
+        return true;
+      }
+
+    //object parse
+    }else if(type == 'o'){
+      //eliminate new key word
+
+      const objectRegex = new RegExp(`\\s+${block}\\s*\\(`);
+
+      if (objectRegex.test(fileContent)) {
+        return true;
+      }
+
+    //field use parse
+    }else if(type =='u'){
+
+      const parts = block.split('.');
+      block = parts[1];
+
+      const useRegex = new RegExp(`\\w+\\s+${block}`);
+
+      if (useRegex.test(fileContent)) {
+        return true;
       }
     }
     
-    function areLinesEqualIgnoringSemicolons(lineA, lineB) {
-      // Remove semicolons and trim any whitespace before comparing
-      return lineA.replace(/;/g, '').trim() === lineB.replace(/;/g, '').trim();
-    }
-    
-  
-    const updatedContent = lines.join('\n');
-  
-    fs.writeFile(file, updatedContent, 'utf-8', (writeErr) => {
-        if (writeErr) {
-          console.error('Error writing to the file:', writeErr);
-        } else {
-          console.log(`Function replaced with new function line by line.`);
-        }
-      });
-    });
+    return false;
+  }catch (e){
+    console.log(e);
   }
+
+}
 
 // Main function
 async function main() {
   buildForest(rootDirectory);
   findSignificantBlocks(forest);
+  findRelationships(hold);
 
   // Print the dependency graph
   // dependencyGraph.forEach((value, key) => {
