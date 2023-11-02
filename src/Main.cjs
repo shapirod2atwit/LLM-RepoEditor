@@ -43,6 +43,41 @@ const relations = {
   UsedBy: 'UsedBy',
 };
 
+//queue needed for plan
+class Queue {
+  constructor() {
+    this.items = {};
+    this.headIndex = 0;
+    this.tailIndex = 0;
+  }
+
+  enqueue(item) {
+    this.items[this.tailIndex] = item;
+    this.tailIndex++;
+  }
+
+  dequeue() {
+    const item = this.items[this.headIndex];
+    delete this.items[this.headIndex];
+    this.headIndex++;
+    return item;
+  }
+
+  peek() {
+    return this.items[this.headIndex];
+  }
+
+  get length() {
+    return this.tailIndex - this.headIndex;
+  }
+}
+
+//returns files that may be impacted if a change is
+//made in the given file
+function changeMayImapct(file){
+
+}
+
 // Function to build forest of ASTs
 function buildForest(directory) {
   const files = fs.readdirSync(directory);
