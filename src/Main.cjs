@@ -22,7 +22,6 @@ var dependencyGraph = new Map();
 var forest = new Map();
 var hold = new Map();
 
-
 // Define the relation labels
 const relations = {
   Imports: 'Imports',
@@ -72,10 +71,30 @@ class Queue {
   }
 }
 
+//TODO
+var prompt = `
+Task:
+
+Earlier Code Changes (Temporal Context):
+
+Related Code (Spatial Context):
+
+Code to be edited:
+
+`;
+
+//TODO
+const functions = [];
+
+var planGraph = new Queue();
+
 //returns files that may be impacted if a change is
 //made in the given file
-function changeMayImapct(file){
+function changeMayImapct(file, relation){
   
+  for(var i = 0; i < dependencyGraph.get(file).blocks[relation].length; i++){
+    planGraph.enqueue(dependencyGraph.get(file).blocks[relation][i]);
+  } 
 }
 
 // Function to build forest of ASTs
@@ -95,6 +114,14 @@ function buildForest(directory) {
       forest.set(filePath, tree);
     }
   });
+}
+
+//when an edit is made, parse tree needs to be updated
+function updateForest(filePath){
+  const code = fs.readFileSync(filePath, 'utf-8');
+  const tree = parser.parse(code);
+
+  forest.set(filePath, tree);
 }
 
 // Function to create AST
@@ -125,7 +152,7 @@ function findRelationships(hold){
                     if(isOrigin(key3, relation[i], 'm')){
                       //graph is bidirectional
                       dependencyGraph.get(key1).blocks[relation].push(key3);
-                      dependencyGraph.get(key3).block[relation2].push(key1);
+                      dependencyGraph.get(key3).blocks[relation2].push(key1);
                     }
                   }
                 }
@@ -139,7 +166,7 @@ function findRelationships(hold){
                   if(relation2 == [relations.InstantiatedBy]){
                     if(isOrigin(key3, relation[i], 'm')){
                       dependencyGraph.get(key1).blocks[relation].push(key3);
-                      dependencyGraph.get(key3).block[relation2].push(key1);
+                      dependencyGraph.get(key3).blocks[relation2].push(key1);
                     }
                   }
                 }
@@ -153,7 +180,7 @@ function findRelationships(hold){
                   if(relation2 == [relations.UsedBy]){
                     if(isOrigin(key3, relation[i], 'm')){
                       dependencyGraph.get(key1).blocks[relation].push(key3);
-                      dependencyGraph.get(key3).block[relation2].push(key1);
+                      dependencyGraph.get(key3).blocks[relation2].push(key1);
                     }
                   }
                 }
@@ -291,7 +318,6 @@ fs.readFile(file, 'utf-8', (err, data) => {
   });
 }
 
-
 //find if codeblock is in the file
 function isOrigin(file, block, type){
 
@@ -341,12 +367,32 @@ function isOrigin(file, block, type){
   }
 
 }
+//TODO
+function buildContext(){
+
+}
 
 // Main function
 async function main() {
   buildForest(rootDirectory);
   findSignificantBlocks(forest);
   findRelationships(hold);
+
+  /**
+   * define seed edit 
+   * 
+   * make edit
+   * 
+   * update plan graph
+   * 
+   * while loop to go through plan graph
+   * 
+   * check files
+   * 
+   * make edit if necessary
+   * 
+   * update dependency graph
+   */
 
   // Print the dependency graph
   // dependencyGraph.forEach((value, key) => {
@@ -359,18 +405,6 @@ async function main() {
   //   console.log(`InstantiatedBy: ${value[relations.InstantiatedBy].join(', ')}`);
   //   console.log(`CalledBy: ${value[relations.Calledby].join(', ')}`);
   // });
-
-  //example run:
-  // const oldBlock = dependencyGraph.get('TestFiles\\test2.cs')[relations.Calls][0]+";";
-  
-  // const prompt = "Modify the following C# codeblock to print \"testing\":\n" + oldBlock;
-
-  // const newBlock = await wrapper(prompt); // Wait for the promise to complete
-  // console.log(oldBlock + "\n\n");
-  // console.log(newBlock.generated_text);
-
-  // console.log("\n\n");
-  // editFile('./TestFiles/test2.cs', oldBlock, newBlock.generated_text);
 }
 
 main();
