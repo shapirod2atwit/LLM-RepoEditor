@@ -21,6 +21,7 @@ const rootDirectory = './TestFiles'; // Adjust this to your repository path
 var dependencyGraph = new Map();
 var forest = new Map();
 var hold = new Map();
+var temporalContext = "";
 
 // Define the relation labels
 const relations = {
@@ -71,30 +72,26 @@ class Queue {
   }
 }
 
-//TODO
-var prompt = `
-Task:
-
-Earlier Code Changes (Temporal Context):
-
-Related Code (Spatial Context):
-
-Code to be edited:
-
-`;
-
-//TODO
+//TODO need function calling llm 1st
 const functions = [];
 
 var planGraph = new Queue();
 
-//returns files that may be impacted if a change is
+//returns codeblocks that may be impacted if a change is
 //made in the given file
-function changeMayImapct(file, relation){
-  
-  for(var i = 0; i < dependencyGraph.get(file).blocks[relation].length; i++){
-    planGraph.enqueue(dependencyGraph.get(file).blocks[relation][i]);
-  } 
+function changeMayImpact(file, oldBlock){
+  //****FIX TOMORROW */
+  dependencyGraph.forEach((value, key) => {
+    for(const relation in value.blocks){
+      if(relation != [relations.Calledby] && relation != [relations.InstantiatedBy] && relation != [relations.UsedBy] && key != file){
+        for(var i = 0; i < relation.length; i++){
+          if(oldBlock == relation[i][1]){
+            planGraph.enqueue([key, value]);
+          }
+        }
+      }
+    }
+  });
 }
 
 // Function to build forest of ASTs
@@ -145,46 +142,39 @@ function findRelationships(hold){
 
           if(relation == [relations.Calls]){
             hold.forEach((value3, key3) => {
-              //***implement case for key1 == key3 later in plan graph */
-              if(key3 != key1){
                 for(const relation2 in value3.blocks){
                   if(relation2 == [relations.Calledby]){
                     if(isOrigin(key3, relation[i], 'm')){
                       //graph is bidirectional
-                      dependencyGraph.get(key1).blocks[relation].push(key3);
-                      dependencyGraph.get(key3).blocks[relation2].push(key1);
+                      //we look for dependencies in codeblocks, not files
+                      //this means a file can be dependent on its self  
+                      dependencyGraph.get(key1).blocks[relation].push([key3, relation[i]]);
+                      dependencyGraph.get(key3).blocks[relation2].push([key1, relation[i]]);
                     }
                   }
                 }
-              }
             });
           }else if(relation == [relations.Instantiates]){
             hold.forEach((value3, key3) => {
-              //***implement case for key1 == key3 later in plan graph */
-              if(key3 != key1){
                 for(const relation2 in value3.blocks){
                   if(relation2 == [relations.InstantiatedBy]){
-                    if(isOrigin(key3, relation[i], 'm')){
-                      dependencyGraph.get(key1).blocks[relation].push(key3);
-                      dependencyGraph.get(key3).blocks[relation2].push(key1);
+                    if(isOrigin(key3, relation[i], 'o')){
+                      dependencyGraph.get(key1).blocks[relation].push([key3, relation[i]]);
+                      dependencyGraph.get(key3).blocks[relation2].push([key1, relation[i]]);
                     }
                   }
                 }
-              }
             });
           }else if (relation == [relations.Uses]){
             hold.forEach((value3, key3) => {
-              //***implement case for key1 == key3 later in plan graph */
-              if(key3 != key1){
                 for(const relation2 in value3.blocks){
                   if(relation2 == [relations.UsedBy]){
-                    if(isOrigin(key3, relation[i], 'm')){
-                      dependencyGraph.get(key1).blocks[relation].push(key3);
-                      dependencyGraph.get(key3).blocks[relation2].push(key1);
+                    if(isOrigin(key3, relation[i], 'u')){
+                      dependencyGraph.get(key1).blocks[relation].push([key3, relation[i]]);
+                      dependencyGraph.get(key3).blocks[relation2].push([key1, relation[i]]);
                     }
                   }
                 }
-              }
             });
           }
         }
@@ -268,7 +258,7 @@ async function wrapper(prompt){
   return result;
 }
 
-//make in-file edits
+//make in-file edits with the LLM response
 function editFile(file, oldBlock, newBlock){
 fs.readFile(file, 'utf-8', (err, data) => {
   if (err) {
@@ -316,6 +306,10 @@ fs.readFile(file, 'utf-8', (err, data) => {
       }
     });
   });
+
+  //update temporal context
+  const str = "File that was changed: " + file +  ", Code Block that was changed: " + oldBlock + ", Code Block after change: " + newBlock;
+  temporalContext.concat("\n", str);
 }
 
 //find if codeblock is in the file
@@ -367,9 +361,86 @@ function isOrigin(file, block, type){
   }
 
 }
-//TODO
-function buildContext(){
 
+//get files that may hold info on current file
+function getSpatialContext(file){
+
+  var ret = "";
+
+  const b = dependencyGraph.get(file).blocks;
+
+  for(const relation in b){
+    if(relation != [relations.InstantiatedBy] && relation != [relations.Calledby] && relation != [relation.UsedBy]){
+      for(var i = 0; i < relation.length; i++){
+        const temp = "File: " + relation[i][0] + ", Code Block" + relation[i][1];
+        ret.concat("\n", temp);
+      }
+    }
+  }
+
+  return ret;
+
+}
+
+//TODO
+function constructPrompt(file){
+
+  //get spatial context
+  const spatialContextArr = getSpatialContext(file);
+  var spatialContext = "";
+  if(spatialContextArr.length > 0){
+    for(var i = 0; i < spatialContextArr.length; i++){
+      spatialContext.concat("\n", spatialContextArr[i]);
+    }
+  }
+
+  var fileContent;
+  //get potentially impacted file as string
+  try{
+    fileContent = fs.readFileSync(file, 'utf-8');
+  }catch (e){
+    console.log(e);
+  }
+
+  //make prompt
+  var prompt = `
+  Task: Your task is to analyze the following temporal and spatial context
+  to determine if the given code needs to be edited. All of the code provided is written in C#.
+  If an edit is not neccessary, simply respond with -1.
+
+  Earlier Code Changes (Temporal Context): ${temporalContext}
+
+  Related Code (Spatial Context): ${spatialContext}
+
+  Code to be edited:
+  ${fileContent}
+
+  PUT MORE HERE
+  `;
+
+  return prompt;
+}
+
+//make the initial edit
+async function seedEdit(file, oldBlock, edit){
+  const intialPrompt = `
+    INSERT LATER
+  `
+  const newBlock = await wrapper(intialPrompt);
+
+  editFile(file, oldBlock, newBlock.generated_text);
+  //changeMayImpact()
+}
+
+function derivedEdit(){
+  const currentBlock = planGraph.dequeue();
+  //evalute dependency to see if llm should be called
+
+  if(answer){//***CHANGE LATER */
+    var newBlock = wrapper(constructPrompt(currentBlock[0]));
+    editFile(currentBlock[0], currentBlock[1], newBlock);
+    //changeMayImpact()
+  }
 }
 
 // Main function
@@ -377,6 +448,11 @@ async function main() {
   buildForest(rootDirectory);
   findSignificantBlocks(forest);
   findRelationships(hold);
+  //seedEdit()
+
+  while(planGraph.length() > 0){
+
+  }
 
   /**
    * define seed edit 
