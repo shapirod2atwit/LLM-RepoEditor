@@ -79,14 +79,13 @@ var planGraph = new Queue();
 
 //returns codeblocks that may be impacted if a change is
 //made in the given file
-function changeMayImpact(file, oldBlock){
-  //****FIX TOMORROW */
+function changeMayImpact(oldBlock){
   dependencyGraph.forEach((value, key) => {
     for(const relation in value.blocks){
-      if(relation != [relations.Calledby] && relation != [relations.InstantiatedBy] && relation != [relations.UsedBy] && key != file){
+      if(relation != [relations.Calledby] && relation != [relations.InstantiatedBy] && relation != [relations.UsedBy]){
         for(var i = 0; i < relation.length; i++){
           if(oldBlock == relation[i][1]){
-            planGraph.enqueue([key, value]);
+            planGraph.enqueue([key, relation[i][1]]);
           }
         }
       }
@@ -259,46 +258,46 @@ async function wrapper(prompt){
 }
 
 //make in-file edits with the LLM response
-function editFile(file, oldBlock, newBlock){
-fs.readFile(file, 'utf-8', (err, data) => {
-  if (err) {
-    console.error('Error reading the file:', err);
-    return;
-  }
+function editFile(file, oldBlock, newBlock) {
+  fs.readFile(file, 'utf-8', (err, data) => {
+    if (err) {
+      console.error('Error reading the file:', err);
+      return;
+    }
 
-  // Split the old block and new block into lines
-  const oldLines = oldBlock.split('\n');
-  const newLines = newBlock.split('\n');
+    // Split the old block and new block into lines
+    const oldLines = oldBlock.split('\n');
+    const newLines = newBlock.split('\n');
 
-  // Iterate through the lines in the file
-  const lines = data.split('\n');
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].trim() === oldLines[0].trim()) {
-      let match = true;
-      for (let j = 1; j < oldLines.length; j++) {
-        if (!lines[i + j] || !areLinesEqualIgnoringSemicolons(lines[i + j], oldLines[j].trim())) {
-          match = false;
-          break;
+    // Iterate through the lines in the file
+    const lines = data.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].trim() === oldLines[0].trim()) {
+        let match = true;
+        for (let j = 1; j < oldLines.length; j++) {
+          if (!lines[i + j] || !areLinesEqualIgnoringSemicolons(lines[i + j], oldLines[j].trim())) {
+            match = false;
+            break;
+          }
+        }
+
+        if (match) {
+          // Replace the old function with the new function
+          lines.splice(i, oldLines.length, ...newLines);
+          i += newLines.length - 1;
         }
       }
-  
-      if (match) {
-        // Replace the old function with the new function
-        lines.splice(i, oldLines.length, ...newLines);
-        i += newLines.length - 1;
-      }
     }
-  }
-  
-  function areLinesEqualIgnoringSemicolons(lineA, lineB) {
-    // Remove semicolons and trim any whitespace before comparing
-    return lineA.replace(/;/g, '').trim() === lineB.replace(/;/g, '').trim();
-  }
-  
 
-  const updatedContent = lines.join('\n');
+    function areLinesEqualIgnoringSemicolons(lineA, lineB) {
+      // Remove semicolons and trim any whitespace before comparing
+      return lineA.replace(/;/g, '').trim() === lineB.replace(/;/g, '').trim();
+    }
 
-  fs.writeFile(file, updatedContent, 'utf-8', (writeErr) => {
+
+    const updatedContent = lines.join('\n');
+
+    fs.writeFile(file, updatedContent, 'utf-8', (writeErr) => {
       if (writeErr) {
         console.error('Error writing to the file:', writeErr);
       } else {
@@ -308,7 +307,7 @@ fs.readFile(file, 'utf-8', (err, data) => {
   });
 
   //update temporal context
-  const str = "File that was changed: " + file +  ", Code Block that was changed: " + oldBlock + ", Code Block after change: " + newBlock;
+  const str = "File that was changed: " + file + ", Code Block that was changed: " + oldBlock + ", Code Block after change: " + newBlock;
   temporalContext.concat("\n", str);
 }
 
@@ -423,52 +422,62 @@ function constructPrompt(file){
 
 //make the initial edit
 async function seedEdit(file, oldBlock, edit){
+
+  //get spatial context
+  const spatialContextArr = getSpatialContext(file);
+  var spatialContext = "";
+  if(spatialContextArr.length > 0){
+    for(var i = 0; i < spatialContextArr.length; i++){
+      spatialContext.concat("\n", spatialContextArr[i]);
+    }
+  }
+
   const intialPrompt = `
     INSERT LATER
   `
   const newBlock = await wrapper(intialPrompt);
 
   editFile(file, oldBlock, newBlock.generated_text);
-  //changeMayImpact()
+  changeMayImpact(oldBlock);
 }
 
 function derivedEdit(){
   const currentBlock = planGraph.dequeue();
-  //evalute dependency to see if llm should be called
 
-  if(answer){//***CHANGE LATER */
-    var newBlock = wrapper(constructPrompt(currentBlock[0]));
-    editFile(currentBlock[0], currentBlock[1], newBlock);
-    //changeMayImpact()
-  }
+  const oldBlock = currentBlock[1];
+
+  var newBlock = wrapper(constructPrompt(currentBlock[0]));
+  editFile(currentBlock[0], oldBlock, newBlock);
+  updateForest(currentBlock[0]);
+  findSignificantBlocks(forest);
+  changeMayImpact(oldBlock);
 }
+
+//parse function/class calls to ignore params
+///
+///
+///
 
 // Main function
 async function main() {
   buildForest(rootDirectory);
   findSignificantBlocks(forest);
   findRelationships(hold);
-  //seedEdit()
 
-  while(planGraph.length() > 0){
-
+  const fileToEdit = `TestFiles\\test2.cs`;//Format: repository\file
+  const blockToEdit = `
+  public void BaseMethod(){
+    Console.WriteLine("base method");
   }
-
-  /**
-   * define seed edit 
-   * 
-   * make edit
-   * 
-   * update plan graph
-   * 
-   * while loop to go through plan graph
-   * 
-   * check files
-   * 
-   * make edit if necessary
-   * 
-   * update dependency graph
-   */
+  `;
+  const editInstruction = `
+  Modify the given C# method 
+  `;
+  seedEdit(fileToEdit, blockToEdit, editInstruction)
+  findRelationships()
+  while(planGraph.length() > 0){
+    derivedEdit();
+  }
 
   // Print the dependency graph
   // dependencyGraph.forEach((value, key) => {
