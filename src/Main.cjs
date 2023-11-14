@@ -84,9 +84,10 @@ function changeMayImpact(oldBlock){
     for(const relation in value.blocks){
       if(relation != [relations.Calledby] && relation != [relations.InstantiatedBy] && relation != [relations.UsedBy]){
         for(var i = 0; i < relation.length; i++){
-          if(oldBlock == relation[i][1]){
-            planGraph.enqueue([key, relation[i][1]]);
-          }
+          
+          // if(oldBlock == relation[i][1]){
+          //   planGraph.enqueue([key, relation[i][1]]);
+          // }
         }
       }
     }
@@ -135,20 +136,24 @@ function findRelationships(hold){
   hold.forEach((value1, key1) => {
     //(key => relationship) (value => array of code blocks)
     for(const relation in value1.blocks){
+      //code can be declared and not used, so find relationships from instantiation, calling, etc.
       if(relation != [relations.Calledby] && relation != [relations.InstantiatedBy] && relation != [relations.UsedBy]){
 
-        for(var i = 0; i < relation.length; i++){
+        //loop through each array of code blocks
+        for(var i = 0; i < value1.blocks[relation].length; i++){
 
+          //go through each relation case to use proper regex in isOrigin()
           if(relation == [relations.Calls]){
             hold.forEach((value3, key3) => {
                 for(const relation2 in value3.blocks){
+                  //compare current block to every possible origin block based on node type
                   if(relation2 == [relations.Calledby]){
-                    if(isOrigin(key3, relation[i], 'm')){
+                    if(isOrigin(key3, value1.blocks[relation][i], 'm')){
                       //graph is bidirectional
                       //we look for dependencies in codeblocks, not files
                       //this means a file can be dependent on its self  
-                      dependencyGraph.get(key1).blocks[relation].push([key3, relation[i]]);
-                      dependencyGraph.get(key3).blocks[relation2].push([key1, relation[i]]);
+                      dependencyGraph.get(key1).blocks[relation].push([key3, value1.blocks[relation][i]]);
+                      dependencyGraph.get(key3).blocks[relation2].push([key1, value1.blocks[relation][i]]);
                     }
                   }
                 }
@@ -157,9 +162,9 @@ function findRelationships(hold){
             hold.forEach((value3, key3) => {
                 for(const relation2 in value3.blocks){
                   if(relation2 == [relations.InstantiatedBy]){
-                    if(isOrigin(key3, relation[i], 'o')){
-                      dependencyGraph.get(key1).blocks[relation].push([key3, relation[i]]);
-                      dependencyGraph.get(key3).blocks[relation2].push([key1, relation[i]]);
+                    if(isOrigin(key3, value1.blocks[relation][i], 'o')){
+                      dependencyGraph.get(key1).blocks[relation].push([key3, value1.blocks[relation][i]]);
+                      dependencyGraph.get(key3).blocks[relation2].push([key1, value1.blocks[relation][i]]);
                     }
                   }
                 }
@@ -168,9 +173,9 @@ function findRelationships(hold){
             hold.forEach((value3, key3) => {
                 for(const relation2 in value3.blocks){
                   if(relation2 == [relations.UsedBy]){
-                    if(isOrigin(key3, relation[i], 'u')){
-                      dependencyGraph.get(key1).blocks[relation].push([key3, relation[i]]);
-                      dependencyGraph.get(key3).blocks[relation2].push([key1, relation[i]]);
+                    if(isOrigin(key3, value1.blocks[relation][i], 'u')){
+                      dependencyGraph.get(key1).blocks[relation].push([key3, value1.blocks[relation][i]]);
+                      dependencyGraph.get(key3).blocks[relation2].push([key1, value1.blocks[relation][i]]);
                     }
                   }
                 }
@@ -235,7 +240,7 @@ function findSignificantBlocks(forest){
     value.rootNode.descendantsOfType('member_access_expression').forEach((node) => {
       if(node.parent.type != 'invocation_expression'){
         hold.get(key).blocks[relations.Uses].push(node.text);
-      }
+      };
     });
 
     value.rootNode.descendantsOfType('field_declaration').forEach((node) => { 
@@ -277,6 +282,7 @@ function editFile(file, oldBlock, newBlock) {
         for (let j = 1; j < oldLines.length; j++) {
           if (!lines[i + j] || !areLinesEqualIgnoringSemicolons(lines[i + j], oldLines[j].trim())) {
             match = false;
+            //console.log(match)//RIGHTHERE
             break;
           }
         }
@@ -301,7 +307,7 @@ function editFile(file, oldBlock, newBlock) {
       if (writeErr) {
         console.error('Error writing to the file:', writeErr);
       } else {
-        console.log(`Function replaced with new function line by line.`);
+        //console.log(`Function replaced with new function line by line.`);
       }
     });
   });
@@ -311,8 +317,53 @@ function editFile(file, oldBlock, newBlock) {
   temporalContext.concat("\n", str);
 }
 
+function isOrigin(file, block, type) {
+  hold.forEach((value, key) => {
+    for (const relation in value.blocks) {
+
+      if (type == 'm' && relation == [relations.Calledby]) {
+        for (var i = 0; i < value.blocks[relation].length; i++) {
+
+          //if an invocation, only take method name
+          if (block.includes('.')) {
+            const parts = block.split('.');
+            block = parts[1];
+          }
+          const methodRegex = new RegExp(`\\s+${block}\\s*\\(`);
+
+          if (methodRegex.test(value.blocks[relation][i])) {
+            return value.blocks[relation][i];
+          }
+        }
+      } else if (type == '0' && relation == [relations.InstantiatedBy]) {
+        for (var i = 0; i < value.blocks[relation].length; i++) {
+          const objectRegex = new RegExp(`\\s+${block}\\s*\\(`);
+
+          if (objectRegex.test(fileContent)) {
+            return value.blocks[relation][i];
+          }
+        }
+      } else if (type == 'u' && relation == [relations.UsedBy]) {
+        for (var i = 0; i < value.blocks[relation].length; i++) {
+          const parts = block.split('.');
+          block = parts[1];
+
+          const useRegex = new RegExp(`\\w+\\s+${block}`);
+
+          if (useRegex.test(fileContent)) {
+            return value.blocks[relation][i];
+          }
+        }
+      }
+
+    }
+  });
+
+  return false;
+}
+
 //find if codeblock is in the file
-function isOrigin(file, block, type){
+function isOrigin1(file, block, type){
 
   try{
     const fileContent = fs.readFileSync(file, 'utf-8');
@@ -381,30 +432,23 @@ function getSpatialContext(file){
 
 }
 
-//TODO
-function constructPrompt(file){
+//make a prompt that contains context and the block that needs to be edited
+function constructPrompt(file, oldBlock){
 
   //get spatial context
   const spatialContextArr = getSpatialContext(file);
   var spatialContext = "";
+  //turn spatial context into string
   if(spatialContextArr.length > 0){
     for(var i = 0; i < spatialContextArr.length; i++){
       spatialContext.concat("\n", spatialContextArr[i]);
     }
   }
 
-  var fileContent;
-  //get potentially impacted file as string
-  try{
-    fileContent = fs.readFileSync(file, 'utf-8');
-  }catch (e){
-    console.log(e);
-  }
-
   //make prompt
   var prompt = `
   Task: Your task is to analyze the following temporal and spatial context
-  to determine if the given code needs to be edited. All of the code provided is written in C#.
+  to make an edit on the following C# code. All of the code provided is written in C#.
   If an edit is not neccessary, simply respond with -1.
 
   Earlier Code Changes (Temporal Context): ${temporalContext}
@@ -412,9 +456,7 @@ function constructPrompt(file){
   Related Code (Spatial Context): ${spatialContext}
 
   Code to be edited:
-  ${fileContent}
-
-  PUT MORE HERE
+  ${oldBlock}
   `;
 
   return prompt;
@@ -433,7 +475,12 @@ async function seedEdit(file, oldBlock, edit){
   }
 
   const intialPrompt = `
-    INSERT LATER
+  Task: ${edit}
+
+  Related Code (Spatial Context): ${spatialContext}
+
+  Code to be edited:
+  ${oldBlock}
   `
   const newBlock = await wrapper(intialPrompt);
 
@@ -441,16 +488,17 @@ async function seedEdit(file, oldBlock, edit){
   changeMayImpact(oldBlock);
 }
 
-function derivedEdit(){
+async function derivedEdit(){
   const currentBlock = planGraph.dequeue();
 
   const oldBlock = currentBlock[1];
 
-  var newBlock = wrapper(constructPrompt(currentBlock[0]));
-  editFile(currentBlock[0], oldBlock, newBlock);
+  var newBlock = await wrapper(constructPrompt(currentBlock[0]));
+  editFile(currentBlock[0], oldBlock, newBlock.generated_text);
   updateForest(currentBlock[0]);
   findSignificantBlocks(forest);
   changeMayImpact(oldBlock);
+  findRelationships(hold);
 }
 
 //parse function/class calls to ignore params
@@ -465,19 +513,23 @@ async function main() {
   findRelationships(hold);
 
   const fileToEdit = `TestFiles\\test2.cs`;//Format: repository\file
-  const blockToEdit = `
-  public void BaseMethod(){
+  const blockToEdit = `public void BaseMethod(){
     Console.WriteLine("base method");
-  }
-  `;
+  }`;
   const editInstruction = `
-  Modify the given C# method 
+  Modify the given C# method to print "hello"
   `;
-  seedEdit(fileToEdit, blockToEdit, editInstruction)
-  findRelationships()
-  while(planGraph.length() > 0){
-    derivedEdit();
-  }
+  // seedEdit(fileToEdit, blockToEdit, editInstruction);
+  // updateForest(fileToEdit);
+  // findSignificantBlocks(forest);
+  // findRelationships(hold);
+  // while(planGraph.length > 0){
+  //   derivedEdit();
+  // }
+
+  console.log(dependencyGraph.get('TestFiles\\test2.cs').blocks[relations.Calledby])
+  console.log(dependencyGraph.get('TestFiles\\test2.cs').blocks[relations.Calls])
+  // console.log(dependencyGraph)
 
   // Print the dependency graph
   // dependencyGraph.forEach((value, key) => {

@@ -6,6 +6,8 @@ project.lock.json
 nupkg/
 *.csproj
 
+TestRepository/
+
 # Visual Studio Code
 .vscode/
 
