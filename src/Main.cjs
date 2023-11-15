@@ -148,11 +148,12 @@ function findRelationships(hold){
                 for(const relation2 in value3.blocks){
                   //compare current block to every possible origin block based on node type
                   if(relation2 == [relations.Calledby]){
-                    if(isOrigin(key3, value1.blocks[relation][i], 'm')){
+                    var origin = isOrigin(key3, value1.blocks[relation][i], 'm');
+                    if(origin){
                       //graph is bidirectional
                       //we look for dependencies in codeblocks, not files
                       //this means a file can be dependent on its self  
-                      dependencyGraph.get(key1).blocks[relation].push([key3, value1.blocks[relation][i]]);
+                      dependencyGraph.get(key1).blocks[relation].push([key3, origin]);
                       dependencyGraph.get(key3).blocks[relation2].push([key1, value1.blocks[relation][i]]);
                     }
                   }
@@ -162,8 +163,9 @@ function findRelationships(hold){
             hold.forEach((value3, key3) => {
                 for(const relation2 in value3.blocks){
                   if(relation2 == [relations.InstantiatedBy]){
-                    if(isOrigin(key3, value1.blocks[relation][i], 'o')){
-                      dependencyGraph.get(key1).blocks[relation].push([key3, value1.blocks[relation][i]]);
+                    var origin = isOrigin(key3, value1.blocks[relation][i], 'o');
+                    if(origin){
+                      dependencyGraph.get(key1).blocks[relation].push([key3, origin]);
                       dependencyGraph.get(key3).blocks[relation2].push([key1, value1.blocks[relation][i]]);
                     }
                   }
@@ -173,8 +175,9 @@ function findRelationships(hold){
             hold.forEach((value3, key3) => {
                 for(const relation2 in value3.blocks){
                   if(relation2 == [relations.UsedBy]){
-                    if(isOrigin(key3, value1.blocks[relation][i], 'u')){
-                      dependencyGraph.get(key1).blocks[relation].push([key3, value1.blocks[relation][i]]);
+                    var origin = isOrigin(key3, value1.blocks[relation][i], 'u');
+                    if(origin){
+                      dependencyGraph.get(key1).blocks[relation].push([key3, origin]);
                       dependencyGraph.get(key3).blocks[relation2].push([key1, value1.blocks[relation][i]]);
                     }
                   }
@@ -318,98 +321,72 @@ function editFile(file, oldBlock, newBlock) {
 }
 
 function isOrigin(file, block, type) {
-  hold.forEach((value, key) => {
-    for (const relation in value.blocks) {
+    for (const relation in hold.get(file).blocks) {
 
+      //path for finding origin of method call
       if (type == 'm' && relation == [relations.Calledby]) {
-        for (var i = 0; i < value.blocks[relation].length; i++) {
+        for (var i = 0; i < hold.get(file).blocks[relation].length; i++) {
 
           //if an invocation, only take method name
           if (block.includes('.')) {
             const parts = block.split('.');
             block = parts[1];
           }
-          const methodRegex = new RegExp(`\\s+${block}\\s*\\(`);
-
-          if (methodRegex.test(value.blocks[relation][i])) {
-            return value.blocks[relation][i];
+          //get method name
+          if(block.includes('(')){
+            const parts = block.split('(');
+            block = parts[0];
+          }
+          
+          //create regex
+          const methodRegex = new RegExp(`${block}`);
+          //ignore writeline call, main method, and then test regex
+          if ( block != "WriteLine" && !hold.get(file).blocks[relation][i].includes("Main") && methodRegex.test(hold.get(file).blocks[relation][i])) {
+            //return codeblock that is the origin of the method call
+            return hold.get(file).blocks[relation][i];
           }
         }
-      } else if (type == '0' && relation == [relations.InstantiatedBy]) {
-        for (var i = 0; i < value.blocks[relation].length; i++) {
-          const objectRegex = new RegExp(`\\s+${block}\\s*\\(`);
-
-          if (objectRegex.test(fileContent)) {
-            return value.blocks[relation][i];
+      //path for finding origin of object instantiation
+      } else if (type == 'o' && relation == [relations.InstantiatedBy]) {
+        const originalBlock = block;
+        for (var i = 0; i < hold.get(file).blocks[relation].length; i++) {
+          
+          //remove new keyword
+          if(block.includes(' ')){
+            const parts = block.split(' ');
+            block = parts[1];
+          }
+          //get name of class
+          if(block.includes('(')){
+            const parts = block.split('(');
+            block = parts[0];
+          }
+          
+          const objectRegex = new RegExp(`${block}`);
+          //search for class declaration
+          if (objectRegex.test(hold.get(file).blocks[relation][i]) && !hold.get(file).blocks[relation][i].includes(originalBlock)) {
+            return hold.get(file).blocks[relation][i];
           }
         }
+      //path for finding origin of field use
       } else if (type == 'u' && relation == [relations.UsedBy]) {
-        for (var i = 0; i < value.blocks[relation].length; i++) {
-          const parts = block.split('.');
-          block = parts[1];
+        for (var i = 0; i < hold.get(file).blocks[relation].length; i++) {
 
+          if(block.includes('.')){
+            const parts = block.split('.');
+            block = parts[1];
+          }
+          
           const useRegex = new RegExp(`\\w+\\s+${block}`);
 
-          if (useRegex.test(fileContent)) {
-            return value.blocks[relation][i];
+          if (useRegex.test(hold.get(file).blocks[relation][i])) {
+            return hold.get(file).blocks[relation][i];
           }
         }
       }
-
-    }
-  });
-
-  return false;
-}
-
-//find if codeblock is in the file
-function isOrigin1(file, block, type){
-
-  try{
-    const fileContent = fs.readFileSync(file, 'utf-8');
-
-    //method parse
-    if(type == 'm'){
-      //if an invocation, only take method name
-      if(block.includes('.')){
-        const parts = block.split('.');
-        block = parts[1];
-      }
-
-      const methodRegex = new RegExp(`\\s+${block}\\s*\\(`);
-
-      if (methodRegex.test(fileContent)) {
-        return true;
-      }
-
-    //object parse
-    }else if(type == 'o'){
-      //eliminate new key word
-
-      const objectRegex = new RegExp(`\\s+${block}\\s*\\(`);
-
-      if (objectRegex.test(fileContent)) {
-        return true;
-      }
-
-    //field use parse
-    }else if(type =='u'){
-
-      const parts = block.split('.');
-      block = parts[1];
-
-      const useRegex = new RegExp(`\\w+\\s+${block}`);
-
-      if (useRegex.test(fileContent)) {
-        return true;
-      }
-    }
-    
-    return false;
-  }catch (e){
-    console.log(e);
   }
 
+  return false;
 }
 
 //get files that may hold info on current file
@@ -501,11 +478,6 @@ async function derivedEdit(){
   findRelationships(hold);
 }
 
-//parse function/class calls to ignore params
-///
-///
-///
-
 // Main function
 async function main() {
   buildForest(rootDirectory);
@@ -527,21 +499,7 @@ async function main() {
   //   derivedEdit();
   // }
 
-  console.log(dependencyGraph.get('TestFiles\\test2.cs').blocks[relations.Calledby])
-  console.log(dependencyGraph.get('TestFiles\\test2.cs').blocks[relations.Calls])
   // console.log(dependencyGraph)
-
-  // Print the dependency graph
-  // dependencyGraph.forEach((value, key) => {
-  //   console.log(`File: ${key}`);
-  //   console.log(`Imports: ${value[relations.Imports].join(', ')}`);
-  //   console.log(`BaseClass: ${value[relations.BaseClassOf].join(', ')}`);
-  //   console.log(`Calls: ${value[relations.Calls].join(', ')}`);
-  //   console.log(`Uses: ${value[relations.Uses].join(', ')}`);
-  //   console.log(`UsedBy: ${value[relations.UsedBy].join(', ')}`);
-  //   console.log(`InstantiatedBy: ${value[relations.InstantiatedBy].join(', ')}`);
-  //   console.log(`CalledBy: ${value[relations.Calledby].join(', ')}`);
-  // });
 }
 
 main();
