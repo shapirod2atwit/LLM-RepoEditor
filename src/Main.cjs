@@ -20,10 +20,14 @@ const rootDirectory = './TestFiles'; // Adjust this to your repository path
 // initialize dependencyGraph and forest
 var dependencyGraph = new Map();
 var forest = new Map();
+
+//variable for holding significant blocks which will later be used in the dependency graph
 var hold = new Map();
+//temporal context starts as an empty string that will upon as the program iterates
 var temporalContext = "";
 
-// Define the relation labels
+//Define the relation labels
+//This helps keep the code neater
 const relations = {
   Imports: 'Imports',
   ImportedBy: 'ImportedBy',
@@ -43,7 +47,7 @@ const relations = {
   UsedBy: 'UsedBy',
 };
 
-//queue needed for plan
+//queue implementation for plan graph
 class Queue {
   constructor() {
     this.items = {};
@@ -79,19 +83,56 @@ var planGraph = new Queue();
 
 //returns codeblocks that may be impacted if a change is
 //made in the given file
-function changeMayImpact(oldBlock){
-  dependencyGraph.forEach((value, key) => {
-    for(const relation in value.blocks){
-      if(relation != [relations.Calledby] && relation != [relations.InstantiatedBy] && relation != [relations.UsedBy]){
-        for(var i = 0; i < relation.length; i++){
-          
-          // if(oldBlock == relation[i][1]){
-          //   planGraph.enqueue([key, relation[i][1]]);
-          // }
+function changeMayImpact(file, oldBlock){
+
+  for(const relation in dependencyGraph.get(file).blocks){
+    if(relation == [relations.Calledby]){
+      for(var i = 0; i < dependencyGraph.get(file).blocks[relation].length; i++){
+        var block = dependencyGraph.get(file).blocks[relation][i][0];
+        if (block.includes('.')) {
+          const parts = block.split('.');
+          block = parts[1];
+        }
+        //get method name
+        if(block.includes('(')){
+          const parts = block.split('(');
+          block = parts[0];
+        }
+        if(oldBlock.includes(block)){
+          planGraph.enqueue([dependencyGraph.get(file).blocks[relation][i][0], dependencyGraph.get(file).blocks[relation][i][1]]);
         }
       }
-    }
-  });
+    }else if(relation == [relations.InstantiatedBy]){
+      for(var i = 0; i < dependencyGraph.get(file).blocks[relation].length; i++){
+        var block = dependencyGraph.get(file).blocks[relation][i][0];
+        //remove new key word
+        if(block.includes(' ')){
+          const parts = block.split(' ');
+          block = parts[1];
+        }
+        //get name of class
+        if(block.includes('(')){
+          const parts = block.split('(');
+          block = parts[0];
+        }
+
+        if(oldBlock.includes(block)){
+          planGraph.enqueue([dependencyGraph.get(file).blocks[relation][i][0], dependencyGraph.get(file).blocks[relation][i][1]]);
+        }
+      }
+    }else if(relation == [relations.UsedBy]){
+      for(var i = 0; i < dependencyGraph.get(file).blocks[relation].length; i++){
+        var block = dependencyGraph.get(file).blocks[relation][i][0];
+        if(block.includes('.')){
+          const parts = block.split('.');
+          block = parts[1];
+        }
+        if(oldBlock.includes(block)){
+          planGraph.enqueue([dependencyGraph.get(file).blocks[relation][i][0], dependencyGraph.get(file).blocks[relation][i][1]]);
+        }
+      }
+    } 
+  }  
 }
 
 // Function to build forest of ASTs
@@ -462,7 +503,11 @@ async function seedEdit(file, oldBlock, edit){
   const newBlock = await wrapper(intialPrompt);
 
   editFile(file, oldBlock, newBlock.generated_text);
-  changeMayImpact(oldBlock);
+  changeMayImpact(file, oldBlock);
+  
+  //return value to make sure action is 
+  //is completed in main before more code executes
+  return 1;
 }
 
 async function derivedEdit(){
@@ -474,8 +519,12 @@ async function derivedEdit(){
   editFile(currentBlock[0], oldBlock, newBlock.generated_text);
   updateForest(currentBlock[0]);
   findSignificantBlocks(forest);
-  changeMayImpact(oldBlock);
+  changeMayImpact(currentBlock[0], oldBlock);
   findRelationships(hold);
+
+  //return value to make sure action is 
+  //is completed in main before more code executes
+  return 1;
 }
 
 // Main function
@@ -491,15 +540,14 @@ async function main() {
   const editInstruction = `
   Modify the given C# method to print "hello"
   `;
-  // seedEdit(fileToEdit, blockToEdit, editInstruction);
-  // updateForest(fileToEdit);
-  // findSignificantBlocks(forest);
-  // findRelationships(hold);
-  // while(planGraph.length > 0){
-  //   derivedEdit();
-  // }
+  const syncingVar1 = await seedEdit(fileToEdit, blockToEdit, editInstruction);
 
-  // console.log(dependencyGraph)
+  updateForest(fileToEdit);
+  findSignificantBlocks(forest);
+  findRelationships(hold);
+  while(planGraph.length > 0){
+    var syncingVar2 = derivedEdit();
+  }
 }
 
 main();
