@@ -3,12 +3,19 @@ const JavaScript = require('tree-sitter-javascript');
 const CSharp = require('tree-sitter-c-sharp');
 const fs = require('fs');
 const path = require('path');
-const { HfInference } = require("@huggingface/inference");
-const { release } = require('os');
+const OpenAI = require('openai');
 
-//bloom api setup
-const inference = new HfInference('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');
-const model = "bigscience/bloom";
+// const { HfInference } = require("@huggingface/inference");
+// const { release } = require('os');
+
+// //bloom api setup
+// const inference = new HfInference('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');
+// const model = "bigscience/bloom";
+
+//openai api setup
+const openai = new OpenAI({
+    apiKey: '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',
+});
 
 //parser setup
 const parser = new Parser();
@@ -76,19 +83,40 @@ class Queue {
   }
 }
 
-//TODO need function calling llm 1st
-const functions = [];
+//define function to ensure code can easily be parsed 
+//from gpt API response
+functions = [
+  {
+    "name": "c-sharp_edit",
+    "description": "Provides a block of C# code, or -1 if no changes are neccessary",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "The C# code block based on the given prompt"
+        }
+      },
+      "required": ["code"]
+    }
+  }
+];
 
+//initialize the plan graph
 var planGraph = new Queue();
 
 //returns codeblocks that may be impacted if a change is
 //made in the given file
 function changeMayImpact(file, oldBlock){
 
+  //go through dependencies of changed file
   for(const relation in dependencyGraph.get(file).blocks){
+
+    //check what the relation is to ensure correct parsing is used
     if(relation == [relations.Calledby]){
       for(var i = 0; i < dependencyGraph.get(file).blocks[relation].length; i++){
         var block = dependencyGraph.get(file).blocks[relation][i][0];
+        //if it is a invocation, take only the method call
         if (block.includes('.')) {
           const parts = block.split('.');
           block = parts[1];
@@ -98,7 +126,10 @@ function changeMayImpact(file, oldBlock){
           const parts = block.split('(');
           block = parts[0];
         }
+
+        //check if the old block that was modified is the source of the current block
         if(oldBlock.includes(block)){
+          //extend the plan graph
           planGraph.enqueue([dependencyGraph.get(file).blocks[relation][i][0], dependencyGraph.get(file).blocks[relation][i][1]]);
         }
       }
@@ -123,6 +154,8 @@ function changeMayImpact(file, oldBlock){
     }else if(relation == [relations.UsedBy]){
       for(var i = 0; i < dependencyGraph.get(file).blocks[relation].length; i++){
         var block = dependencyGraph.get(file).blocks[relation][i][0];
+
+        //get variable name
         if(block.includes('.')){
           const parts = block.split('.');
           block = parts[1];
@@ -154,7 +187,7 @@ function buildForest(directory) {
   });
 }
 
-//when an edit is made, parse tree needs to be updated
+//when an edit is made, forest needs to be updated
 function updateForest(filePath){
   const code = fs.readFileSync(filePath, 'utf-8');
   const tree = parser.parse(code);
@@ -298,12 +331,19 @@ function findSignificantBlocks(forest){
 
 //send prompt to llm
 async function wrapper(prompt){
-  const result = await inference.textGeneration({
-      inputs: prompt,
-      model: model,
+  const result = await openai.chat.completions.create({
+    messages: [{ role: "user", content: prompt }],
+    model: "gpt-3.5-turbo",
+    functions: functions,
+    function_call: {'name':'c-sharp_edit'}
   });
 
-  return result;
+  //get JSON response as a string
+  var res = result.choices[0]["message"]["function_call"]["arguments"];
+  //turn string into JSON
+  res = JSON.parse(res);
+  //return new block of code
+  return res['code'];
 }
 
 //make in-file edits with the LLM response
@@ -502,7 +542,7 @@ async function seedEdit(file, oldBlock, edit){
   `
   const newBlock = await wrapper(intialPrompt);
 
-  editFile(file, oldBlock, newBlock.generated_text);
+  editFile(file, oldBlock, newBlock);
   changeMayImpact(file, oldBlock);
   
   //return value to make sure action is 
@@ -516,7 +556,7 @@ async function derivedEdit(){
   const oldBlock = currentBlock[1];
 
   var newBlock = await wrapper(constructPrompt(currentBlock[0]));
-  editFile(currentBlock[0], oldBlock, newBlock.generated_text);
+  editFile(currentBlock[0], oldBlock, newBlock);
   updateForest(currentBlock[0]);
   findSignificantBlocks(forest);
   changeMayImpact(currentBlock[0], oldBlock);
@@ -534,11 +574,11 @@ async function main() {
   findRelationships(hold);
 
   const fileToEdit = `TestFiles\\test2.cs`;//Format: repository\file
-  const blockToEdit = `public void BaseMethod(){
-    Console.WriteLine("base method");
+  const blockToEdit = `public static int check(){
+    return 0;
   }`;
   const editInstruction = `
-  Modify the given C# method to print "hello"
+  Modify the given C# method to take an int and return that parameter squared
   `;
   const syncingVar1 = await seedEdit(fileToEdit, blockToEdit, editInstruction);
 
