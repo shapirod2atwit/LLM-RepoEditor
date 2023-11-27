@@ -31,7 +31,7 @@ var forest = new Map();
 //variable for holding significant blocks which will later be used in the dependency graph
 var hold = new Map();
 //temporal context starts as an empty string that will upon as the program iterates
-var temporalContext = "";
+var temporalContext = [];
 
 //Define the relation labels
 //This helps keep the code neater
@@ -115,7 +115,7 @@ function changeMayImpact(file, oldBlock){
     //check what the relation is to ensure correct parsing is used
     if(relation == [relations.Calledby]){
       for(var i = 0; i < dependencyGraph.get(file).blocks[relation].length; i++){
-        var block = dependencyGraph.get(file).blocks[relation][i][0];
+        var block = dependencyGraph.get(file).blocks[relation][i][1];
         //if it is a invocation, take only the method call
         if (block.includes('.')) {
           const parts = block.split('.');
@@ -135,7 +135,7 @@ function changeMayImpact(file, oldBlock){
       }
     }else if(relation == [relations.InstantiatedBy]){
       for(var i = 0; i < dependencyGraph.get(file).blocks[relation].length; i++){
-        var block = dependencyGraph.get(file).blocks[relation][i][0];
+        var block = dependencyGraph.get(file).blocks[relation][i][1];
         //remove new key word
         if(block.includes(' ')){
           const parts = block.split(' ');
@@ -153,7 +153,7 @@ function changeMayImpact(file, oldBlock){
       }
     }else if(relation == [relations.UsedBy]){
       for(var i = 0; i < dependencyGraph.get(file).blocks[relation].length; i++){
-        var block = dependencyGraph.get(file).blocks[relation][i][0];
+        var block = dependencyGraph.get(file).blocks[relation][i][1];
 
         //get variable name
         if(block.includes('.')){
@@ -366,7 +366,6 @@ function editFile(file, oldBlock, newBlock) {
         for (let j = 1; j < oldLines.length; j++) {
           if (!lines[i + j] || !areLinesEqualIgnoringSemicolons(lines[i + j], oldLines[j].trim())) {
             match = false;
-            //console.log(match)//RIGHTHERE
             break;
           }
         }
@@ -384,9 +383,9 @@ function editFile(file, oldBlock, newBlock) {
       return lineA.replace(/;/g, '').trim() === lineB.replace(/;/g, '').trim();
     }
 
-
     const updatedContent = lines.join('\n');
 
+    //make change in the file
     fs.writeFile(file, updatedContent, 'utf-8', (writeErr) => {
       if (writeErr) {
         console.error('Error writing to the file:', writeErr);
@@ -395,10 +394,6 @@ function editFile(file, oldBlock, newBlock) {
       }
     });
   });
-
-  //update temporal context
-  const str = "File that was changed: " + file + ", Code Block that was changed: " + oldBlock + ", Code Block after change: " + newBlock;
-  temporalContext.concat("\n", str);
 }
 
 function isOrigin(file, block, type) {
@@ -470,18 +465,16 @@ function isOrigin(file, block, type) {
   return false;
 }
 
-//get files that may hold info on current file
+//get code blocks that may hold info on current file
 function getSpatialContext(file){
 
   var ret = "";
 
-  const b = dependencyGraph.get(file).blocks;
-
-  for(const relation in b){
+  for(const relation in dependencyGraph.get(file).blocks){
     if(relation != [relations.InstantiatedBy] && relation != [relations.Calledby] && relation != [relation.UsedBy]){
-      for(var i = 0; i < relation.length; i++){
-        const temp = "File: " + relation[i][0] + ", Code Block" + relation[i][1];
-        ret.concat("\n", temp);
+      for(var i = 0; i < dependencyGraph.get(file).blocks[relation].length; i++){
+        const temp = "File: " + dependencyGraph.get(file).blocks[relation][i][0] + ", Code Block: " + dependencyGraph.get(file).blocks[relation][i][1];
+        ret+="\n" + temp;
       }
     }
   }
@@ -490,26 +483,31 @@ function getSpatialContext(file){
 
 }
 
+//format temporal context and return it
+function getTemporalContext(){
+
+  var ret = "";
+
+  for(var i = 0; i < temporalContext.length; i++){
+    ret += temporalContext[i];
+  }
+
+  return ret;
+}
+
 //make a prompt that contains context and the block that needs to be edited
 function constructPrompt(file, oldBlock){
 
   //get spatial context
-  const spatialContextArr = getSpatialContext(file);
-  var spatialContext = "";
-  //turn spatial context into string
-  if(spatialContextArr.length > 0){
-    for(var i = 0; i < spatialContextArr.length; i++){
-      spatialContext.concat("\n", spatialContextArr[i]);
-    }
-  }
+  const spatialContext = getSpatialContext(file);
 
   //make prompt
   var prompt = `
   Task: Your task is to analyze the following temporal and spatial context
-  to make an edit on the following C# code. All of the code provided is written in C#.
-  If an edit is not neccessary, simply respond with -1.
+  to make an edit on the following C# code. Based on the temporal and spatial
+  context, the code you create must compile.
 
-  Earlier Code Changes (Temporal Context): ${temporalContext}
+  Earlier Code Changes (Temporal Context): ${tempContext}
 
   Related Code (Spatial Context): ${spatialContext}
 
@@ -524,13 +522,7 @@ function constructPrompt(file, oldBlock){
 async function seedEdit(file, oldBlock, edit){
 
   //get spatial context
-  const spatialContextArr = getSpatialContext(file);
-  var spatialContext = "";
-  if(spatialContextArr.length > 0){
-    for(var i = 0; i < spatialContextArr.length; i++){
-      spatialContext.concat("\n", spatialContextArr[i]);
-    }
-  }
+  const spatialContext = getSpatialContext(file);
 
   const intialPrompt = `
   Task: ${edit}
@@ -544,6 +536,10 @@ async function seedEdit(file, oldBlock, edit){
 
   editFile(file, oldBlock, newBlock);
   changeMayImpact(file, oldBlock);
+
+  //update temporal context
+  const str = "File that was changed: " + file + "\nCode Block that was changed: " + oldBlock + "\nCode Block after change: " + newBlock + ",\n";
+  temporalContext.push(str);
   
   //return value to make sure action is 
   //is completed in main before more code executes
@@ -555,7 +551,13 @@ async function derivedEdit(){
 
   const oldBlock = currentBlock[1];
 
-  var newBlock = await wrapper(constructPrompt(currentBlock[0]));
+  var newBlock = await wrapper(constructPrompt(currentBlock[0], oldBlock));
+
+  //update temporal context
+  const str = "File that was changed: " + file + "\nCode Block that was changed: " + oldBlock + "\nCode Block after change: " + newBlock + ",\n";
+  temporalContext.push(str);
+  
+
   editFile(currentBlock[0], oldBlock, newBlock);
   updateForest(currentBlock[0]);
   findSignificantBlocks(forest);
@@ -567,24 +569,29 @@ async function derivedEdit(){
   return 1;
 }
 
-// Main function
+//Main function
 async function main() {
   buildForest(rootDirectory);
   findSignificantBlocks(forest);
   findRelationships(hold);
 
   const fileToEdit = `TestFiles\\test2.cs`;//Format: repository\file
+  //the code block that you want to change
   const blockToEdit = `public static int check(){
     return 0;
   }`;
+  //how do you want the above code block to change
   const editInstruction = `
   Modify the given C# method to take an int and return that parameter squared
   `;
-  const syncingVar1 = await seedEdit(fileToEdit, blockToEdit, editInstruction);
+
+ const syncingVar1 = await seedEdit(fileToEdit, blockToEdit, editInstruction);
 
   updateForest(fileToEdit);
   findSignificantBlocks(forest);
   findRelationships(hold);
+
+
   while(planGraph.length > 0){
     var syncingVar2 = derivedEdit();
   }
