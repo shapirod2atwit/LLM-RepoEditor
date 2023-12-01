@@ -4,6 +4,7 @@ const CSharp = require('tree-sitter-c-sharp');
 const fs = require('fs');
 const path = require('path');
 const OpenAI = require('openai');
+const { get } = require('http');
 
 // const { HfInference } = require("@huggingface/inference");
 // const { release } = require('os');
@@ -500,12 +501,15 @@ function constructPrompt(file, oldBlock){
 
   //get spatial context
   const spatialContext = getSpatialContext(file);
+  const tempContext = getTemporalContext();
 
   //make prompt
   var prompt = `
   Task: Your task is to analyze the following temporal and spatial context
   to make an edit on the following C# code. Based on the temporal and spatial
-  context, the code you create must compile.
+  context, the code you create must compile. For example, if the parameters of
+  a method are edited in the temporal context, then the calls of that method
+  must have the correct parameter types and amounts.
 
   Earlier Code Changes (Temporal Context): ${tempContext}
 
@@ -554,14 +558,18 @@ async function derivedEdit(){
   var newBlock = await wrapper(constructPrompt(currentBlock[0], oldBlock));
 
   //update temporal context
-  const str = "File that was changed: " + file + "\nCode Block that was changed: " + oldBlock + "\nCode Block after change: " + newBlock + ",\n";
+  const str = "File that was changed: " + currentBlock[0] + "\nCode Block that was changed: " + oldBlock + "\nCode Block after change: " + newBlock + ",\n";
   temporalContext.push(str);
   
-
+  //make in-file edit
   editFile(currentBlock[0], oldBlock, newBlock);
+  //update syntax tree and forest
   updateForest(currentBlock[0]);
+  //update what blocks are significant
   findSignificantBlocks(forest);
+  //update plan queue
   changeMayImpact(currentBlock[0], oldBlock);
+  //update depenedncy graph
   findRelationships(hold);
 
   //return value to make sure action is 
