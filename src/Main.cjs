@@ -3,71 +3,20 @@ const JavaScript = require('tree-sitter-javascript');
 const CSharp = require('tree-sitter-c-sharp');
 const fs = require('fs');
 const path = require('path');
-const { HfInference } = require("@huggingface/inference");
+const OpenAI = require('openai');
+const { get } = require('http');
 
-//bloom api setup
-const inference = new HfInference('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');
-const model = "bigscience/bloom";
+// const { HfInference } = require("@huggingface/inference");
+// const { release } = require('os');
 
-//send prompt to llm
-async function wrapper(prompt){
-    const result = await inference.textGeneration({
-        inputs: prompt,
-        model: model,
-    });
+// //bloom api setup
+// const inference = new HfInference('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');
+// const model = "bigscience/bloom";
 
-    return result;
-}
-
-//make in-file edits
-function editFile(file, oldBlock, newBlock){
-  fs.readFile(file, 'utf-8', (err, data) => {
-    if (err) {
-      console.error('Error reading the file:', err);
-      return;
-    }
-  
-    // Split the old block and new block into lines
-    const oldLines = oldBlock.split('\n');
-    const newLines = newBlock.split('\n');
-  
-    // Iterate through the lines in the file
-    const lines = data.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].trim() === oldLines[0].trim()) {
-        let match = true;
-        for (let j = 1; j < oldLines.length; j++) {
-          if (!lines[i + j] || !areLinesEqualIgnoringSemicolons(lines[i + j], oldLines[j].trim())) {
-            match = false;
-            break;
-          }
-        }
-    
-        if (match) {
-          // Replace the old function with the new function
-          lines.splice(i, oldLines.length, ...newLines);
-          i += newLines.length - 1;
-        }
-      }
-    }
-    
-    function areLinesEqualIgnoringSemicolons(lineA, lineB) {
-      // Remove semicolons and trim any whitespace before comparing
-      return lineA.replace(/;/g, '').trim() === lineB.replace(/;/g, '').trim();
-    }
-    
-  
-    const updatedContent = lines.join('\n');
-  
-    fs.writeFile(file, updatedContent, 'utf-8', (writeErr) => {
-      if (writeErr) {
-        console.error('Error writing to the file:', writeErr);
-      } else {
-        console.log(`Function replaced with new function line by line.`);
-      }
-    });
-  });
-}
+//openai api setup
+const openai = new OpenAI({
+    apiKey: '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',
+});
 
 //parser setup
 const parser = new Parser();
@@ -80,7 +29,13 @@ const rootDirectory = './TestFiles'; // Adjust this to your repository path
 var dependencyGraph = new Map();
 var forest = new Map();
 
-// Define the relation labels
+//variable for holding significant blocks which will later be used in the dependency graph
+var hold = new Map();
+//temporal context starts as an empty string that will upon as the program iterates
+var temporalContext = [];
+
+//Define the relation labels
+//This helps keep the code neater
 const relations = {
   Imports: 'Imports',
   ImportedBy: 'ImportedBy',
@@ -100,104 +55,121 @@ const relations = {
   UsedBy: 'UsedBy',
 };
 
-// Function to parse files
-function parseFile(filePath) {
-  const code = fs.readFileSync(filePath, 'utf-8');
-  const tree = parser.parse(code);
+//queue implementation for plan graph
+class Queue {
+  constructor() {
+    this.items = {};
+    this.headIndex = 0;
+    this.tailIndex = 0;
+  }
 
-  return tree;
+  enqueue(item) {
+    this.items[this.tailIndex] = item;
+    this.tailIndex++;
+  }
+
+  dequeue() {
+    const item = this.items[this.headIndex];
+    delete this.items[this.headIndex];
+    this.headIndex++;
+    return item;
+  }
+
+  peek() {
+    return this.items[this.headIndex];
+  }
+
+  get length() {
+    return this.tailIndex - this.headIndex;
+  }
 }
 
-//used to find dependencies between files
-function findRelationships(dependencyGraph){
-
-  var relations;
-
-  dependencyGraph.forEach((value, key) => {
-    if(key != value[relations.UsedBy] && key != value[relations.Calledby] && key != value[relations.InstantiatedBy]){
-      for(var i = 0; i < value[relations.Uses].length; i++){
-        
-      }
-      for(var i = 0; i < value[relations.Calls].length; i++){
-        
-      }
-      for(var i = 0; i < value[relations.Instantiates].length; i++){
-        
-      }
+//define function to ensure code can easily be parsed 
+//from gpt API response
+functions = [
+  {
+    "name": "c-sharp_edit",
+    "description": "Provides a block of C# code, or -1 if no changes are neccessary",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "The C# code block based on the given prompt"
+        }
+      },
+      "required": ["code"]
     }
-  });
+  }
+];
 
-  return relations;
-  
+//initialize the plan graph
+var planGraph = new Queue();
+
+//returns codeblocks that may be impacted if a change is
+//made in the given file
+function changeMayImpact(file, oldBlock){
+
+  //go through dependencies of changed file
+  for(const relation in dependencyGraph.get(file).blocks){
+
+    //check what the relation is to ensure correct parsing is used
+    if(relation == [relations.Calledby]){
+      for(var i = 0; i < dependencyGraph.get(file).blocks[relation].length; i++){
+        var block = dependencyGraph.get(file).blocks[relation][i][1];
+        //if it is a invocation, take only the method call
+        if (block.includes('.')) {
+          const parts = block.split('.');
+          block = parts[1];
+        }
+        //get method name
+        if(block.includes('(')){
+          const parts = block.split('(');
+          block = parts[0];
+        }
+
+        //check if the old block that was modified is the source of the current block
+        if(oldBlock.includes(block)){
+          //extend the plan graph
+          planGraph.enqueue([dependencyGraph.get(file).blocks[relation][i][0], dependencyGraph.get(file).blocks[relation][i][1]]);
+        }
+      }
+    }else if(relation == [relations.InstantiatedBy]){
+      for(var i = 0; i < dependencyGraph.get(file).blocks[relation].length; i++){
+        var block = dependencyGraph.get(file).blocks[relation][i][1];
+        //remove new key word
+        if(block.includes(' ')){
+          const parts = block.split(' ');
+          block = parts[1];
+        }
+        //get name of class
+        if(block.includes('(')){
+          const parts = block.split('(');
+          block = parts[0];
+        }
+
+        if(oldBlock.includes(block)){
+          planGraph.enqueue([dependencyGraph.get(file).blocks[relation][i][0], dependencyGraph.get(file).blocks[relation][i][1]]);
+        }
+      }
+    }else if(relation == [relations.UsedBy]){
+      for(var i = 0; i < dependencyGraph.get(file).blocks[relation].length; i++){
+        var block = dependencyGraph.get(file).blocks[relation][i][1];
+
+        //get variable name
+        if(block.includes('.')){
+          const parts = block.split('.');
+          block = parts[1];
+        }
+        if(oldBlock.includes(block)){
+          planGraph.enqueue([dependencyGraph.get(file).blocks[relation][i][0], dependencyGraph.get(file).blocks[relation][i][1]]);
+        }
+      }
+    } 
+  }  
 }
 
-function findSignificantBlocks(forest){
-  const dependencies = {
-    [relations.Imports]: [],
-    [relations.BaseClassOf]: [],
-    [relations.Calls]: [],
-    [relations.Calledby]: [],
-    [relations.Uses]: [],
-    [relations.UsedBy]: [],
-    [relations.Instantiates]: [],
-    [relations.InstantiatedBy]: [],
-  };
-
-  forest.forEach((value, key) => {
-
-  });
-
-  // Search for import statements in the abstract syntax tree (AST)
-  tree.rootNode.descendantsOfType('import_statement').forEach((node) => {
-    dependencies[relations.Imports].push(node.text);
-  });
-
-  // Search for inherited classes in the abstract syntax tree (AST)
-  tree.rootNode.descendantsOfType('class_heritage').forEach((node) => {
-    dependencies[relations.BaseClassOf].push(node.text);
-  });
-
-  // Search for method calls in the abstract syntax tree (AST)
-  tree.rootNode.descendantsOfType('call_expression').forEach((node) => {
-    dependencies[relations.Calls].push(node.text);
-  });
-
-  // Search for method invocations in the abstract syntax tree (AST)
-  tree.rootNode.descendantsOfType('invocation_expression').forEach((node) => {
-    dependencies[relations.Calls].push(node.text);
-  });
-
-  // Search for object instantiation in the abstract syntax tree (AST)
-  tree.rootNode.descendantsOfType('object_creation_expression').forEach((node) => {
-    dependencies[relations.Instantiates].push(node.text);
-  });
-
-  // Search for field use relations in the abstract syntax tree (AST)
-  tree.rootNode.descendantsOfType('member_access_expression').forEach((node) => {
-    //check if its a field and not a method invocation
-    if(node.parent.type != 'invocation_expression'){
-      dependencies[relations.Uses].push(node.text);
-    }
-  });
-
-  tree.rootNode.descendantsOfType('method_declaration').forEach((node) => {
-    dependencies[relations.Calledby].push(node.text);
-  });
-
-  tree.rootNode.descendantsOfType('class_declaration').forEach((node) => {
-    dependencies[relations.InstantiatedBy].push(node.text);
-  });
-
-  tree.rootNode.descendantsOfType('field_declaration').forEach((node) => {
-    dependencies[relations.UsedBy].push(node.text);
-  });
-
-  class_heritage, call_expression, invocation_expression, element_access_expression, object_creation_expression
-  method_declaration, class_declaration, field_declaration
-  return dependencies;
-}
-
-// Function to build the dependency graph
+// Function to build forest of ASTs
 function buildForest(directory) {
   const files = fs.readdirSync(directory);
 
@@ -216,33 +188,421 @@ function buildForest(directory) {
   });
 }
 
-// Main function
-async function main() {
-  buildDependencyGraph(rootDirectory);
+//when an edit is made, forest needs to be updated
+function updateForest(filePath){
+  const code = fs.readFileSync(filePath, 'utf-8');
+  const tree = parser.parse(code);
 
-  // Print the dependency graph
-  dependencyGraph.forEach((value, key) => {
-    console.log(`File: ${key}`);
-    console.log(`Imports: ${value[relations.Imports].join(', ')}`);
-    console.log(`BaseClass: ${value[relations.BaseClassOf].join(', ')}`);
-    console.log(`Calls: ${value[relations.Calls].join(', ')}`);
-    console.log(`Uses: ${value[relations.Uses].join(', ')}`);
-    console.log(`UsedBy: ${value[relations.UsedBy].join(', ')}`);
-    console.log(`InstantiatedBy: ${value[relations.InstantiatedBy].join(', ')}`);
-    console.log(`CalledBy: ${value[relations.Calledby].join(', ')}`);
+  forest.set(filePath, tree);
+}
+
+// Function to create AST
+function parseFile(filePath) {
+  const code = fs.readFileSync(filePath, 'utf-8');
+  const tree = parser.parse(code);
+
+  return tree;
+}
+
+//used to find dependencies between files
+function findRelationships(hold){
+
+  //(key => file path) (value => object holding map)
+  hold.forEach((value1, key1) => {
+    //(key => relationship) (value => array of code blocks)
+    for(const relation in value1.blocks){
+      //code can be declared and not used, so find relationships from instantiation, calling, etc.
+      if(relation != [relations.Calledby] && relation != [relations.InstantiatedBy] && relation != [relations.UsedBy]){
+
+        //loop through each array of code blocks
+        for(var i = 0; i < value1.blocks[relation].length; i++){
+
+          //go through each relation case to use proper regex in isOrigin()
+          if(relation == [relations.Calls]){
+            hold.forEach((value3, key3) => {
+                for(const relation2 in value3.blocks){
+                  //compare current block to every possible origin block based on node type
+                  if(relation2 == [relations.Calledby]){
+                    var origin = isOrigin(key3, value1.blocks[relation][i], 'm');
+                    if(origin){
+                      //graph is bidirectional
+                      //we look for dependencies in codeblocks, not files
+                      //this means a file can be dependent on its self  
+                      dependencyGraph.get(key1).blocks[relation].push([key3, origin]);
+                      dependencyGraph.get(key3).blocks[relation2].push([key1, value1.blocks[relation][i]]);
+                    }
+                  }
+                }
+            });
+          }else if(relation == [relations.Instantiates]){
+            hold.forEach((value3, key3) => {
+                for(const relation2 in value3.blocks){
+                  if(relation2 == [relations.InstantiatedBy]){
+                    var origin = isOrigin(key3, value1.blocks[relation][i], 'o');
+                    if(origin){
+                      dependencyGraph.get(key1).blocks[relation].push([key3, origin]);
+                      dependencyGraph.get(key3).blocks[relation2].push([key1, value1.blocks[relation][i]]);
+                    }
+                  }
+                }
+            });
+          }else if (relation == [relations.Uses]){
+            hold.forEach((value3, key3) => {
+                for(const relation2 in value3.blocks){
+                  if(relation2 == [relations.UsedBy]){
+                    var origin = isOrigin(key3, value1.blocks[relation][i], 'u');
+                    if(origin){
+                      dependencyGraph.get(key1).blocks[relation].push([key3, origin]);
+                      dependencyGraph.get(key3).blocks[relation2].push([key1, value1.blocks[relation][i]]);
+                    }
+                  }
+                }
+            });
+          }
+        }
+      }
+    }
+  });  
+}
+
+//constructor for making obj that holds significant code blocks
+function codeBlocks(){
+  this.blocks = {
+    [relations.Imports]: [],
+    [relations.BaseClassOf]: [],
+    [relations.Calls]: [],
+    [relations.Calledby]: [],
+    [relations.Uses]: [],
+    [relations.UsedBy]: [],
+    [relations.Instantiates]: [],
+    [relations.InstantiatedBy]: [],
+  };
+}
+
+//find all code blocks that are dependent & depended on
+function findSignificantBlocks(forest){
+
+  forest.forEach((value, key) => {
+    hold.set(key, new codeBlocks());
+    dependencyGraph.set(key, new codeBlocks());
+
+    //****will add searches for more types once corresponding source nodes are found */
+    // value.rootNode.descendantsOfType('import_statement').forEach((node) => {
+    //   hold.get(key).blocks[relations.Imports].push(node.text);
+    // });
+
+    // value.rootNode.descendantsOfType('class_heritage').forEach((node) => {
+    //   hold.get(key).blocks[relations.BaseClassOf].push(node.text);
+    // });
+
+    value.rootNode.descendantsOfType('call_expression').forEach((node) => {
+      hold.get(key).blocks[relations.Calls].push(node.text);
+    });
+
+    value.rootNode.descendantsOfType('invocation_expression').forEach((node) => {
+      hold.get(key).blocks[relations.Calls].push(node.text);
+    });
+
+    value.rootNode.descendantsOfType('method_declaration').forEach((node) => {
+      hold.get(key).blocks[relations.Calledby].push(node.text);
+    });
+
+    value.rootNode.descendantsOfType('object_creation_expression').forEach((node) => {
+      hold.get(key).blocks[relations.Instantiates].push(node.text);
+    });
+
+    value.rootNode.descendantsOfType('class_declaration').forEach((node) => {
+      hold.get(key).blocks[relations.InstantiatedBy].push(node.text);
+    });
+
+    value.rootNode.descendantsOfType('member_access_expression').forEach((node) => {
+      if(node.parent.type != 'invocation_expression'){
+        hold.get(key).blocks[relations.Uses].push(node.text);
+      };
+    });
+
+    value.rootNode.descendantsOfType('field_declaration').forEach((node) => { 
+        hold.get(key).blocks[relations.UsedBy].push(node.text);
+    });
   });
 
-  //example run:
-  // const oldBlock = dependencyGraph.get('TestFiles\\test2.cs')[relations.Calls][0]+";";
+  // class_heritage, call_expression, invocation_expression, element_access_expression, object_creation_expression
+  // method_declaration, class_declaration, field_declaration
+}
+
+//send prompt to llm
+async function wrapper(prompt){
+  const result = await openai.chat.completions.create({
+    messages: [{ role: "user", content: prompt }],
+    model: "gpt-3.5-turbo",
+    functions: functions,
+    function_call: {'name':'c-sharp_edit'}
+  });
+
+  //get JSON response as a string
+  var res = result.choices[0]["message"]["function_call"]["arguments"];
+  //turn string into JSON
+  res = JSON.parse(res);
+  //return new block of code
+  return res['code'];
+}
+
+//make in-file edits with the LLM response
+function editFile(file, oldBlock, newBlock) {
+  fs.readFile(file, 'utf-8', (err, data) => {
+    if (err) {
+      console.error('Error reading the file:', err);
+      return;
+    }
+
+    // Split the old block and new block into lines
+    const oldLines = oldBlock.split('\n');
+    const newLines = newBlock.split('\n');
+
+    // Iterate through the lines in the file
+    const lines = data.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].trim() === oldLines[0].trim()) {
+        let match = true;
+        for (let j = 1; j < oldLines.length; j++) {
+          if (!lines[i + j] || !areLinesEqualIgnoringSemicolons(lines[i + j], oldLines[j].trim())) {
+            match = false;
+            break;
+          }
+        }
+
+        if (match) {
+          // Replace the old function with the new function
+          lines.splice(i, oldLines.length, ...newLines);
+          i += newLines.length - 1;
+        }
+      }
+    }
+
+    function areLinesEqualIgnoringSemicolons(lineA, lineB) {
+      // Remove semicolons and trim any whitespace before comparing
+      return lineA.replace(/;/g, '').trim() === lineB.replace(/;/g, '').trim();
+    }
+
+    const updatedContent = lines.join('\n');
+
+    //make change in the file
+    fs.writeFile(file, updatedContent, 'utf-8', (writeErr) => {
+      if (writeErr) {
+        console.error('Error writing to the file:', writeErr);
+      } else {
+        //console.log(`Function replaced with new function line by line.`);
+      }
+    });
+  });
+}
+
+function isOrigin(file, block, type) {
+    for (const relation in hold.get(file).blocks) {
+
+      //path for finding origin of method call
+      if (type == 'm' && relation == [relations.Calledby]) {
+        for (var i = 0; i < hold.get(file).blocks[relation].length; i++) {
+
+          //if an invocation, only take method name
+          if (block.includes('.')) {
+            const parts = block.split('.');
+            block = parts[1];
+          }
+          //get method name
+          if(block.includes('(')){
+            const parts = block.split('(');
+            block = parts[0];
+          }
+          
+          //create regex
+          const methodRegex = new RegExp(`${block}`);
+          //ignore writeline call, main method, and then test regex
+          if ( block != "WriteLine" && !hold.get(file).blocks[relation][i].includes("Main") && methodRegex.test(hold.get(file).blocks[relation][i])) {
+            //return codeblock that is the origin of the method call
+            return hold.get(file).blocks[relation][i];
+          }
+        }
+      //path for finding origin of object instantiation
+      } else if (type == 'o' && relation == [relations.InstantiatedBy]) {
+        const originalBlock = block;
+        for (var i = 0; i < hold.get(file).blocks[relation].length; i++) {
+          
+          //remove new keyword
+          if(block.includes(' ')){
+            const parts = block.split(' ');
+            block = parts[1];
+          }
+          //get name of class
+          if(block.includes('(')){
+            const parts = block.split('(');
+            block = parts[0];
+          }
+          
+          const objectRegex = new RegExp(`${block}`);
+          //search for class declaration
+          if (objectRegex.test(hold.get(file).blocks[relation][i]) && !hold.get(file).blocks[relation][i].includes(originalBlock)) {
+            return hold.get(file).blocks[relation][i];
+          }
+        }
+      //path for finding origin of field use
+      } else if (type == 'u' && relation == [relations.UsedBy]) {
+        for (var i = 0; i < hold.get(file).blocks[relation].length; i++) {
+
+          if(block.includes('.')){
+            const parts = block.split('.');
+            block = parts[1];
+          }
+          
+          const useRegex = new RegExp(`\\w+\\s+${block}`);
+
+          if (useRegex.test(hold.get(file).blocks[relation][i])) {
+            return hold.get(file).blocks[relation][i];
+          }
+        }
+      }
+  }
+
+  return false;
+}
+
+//get code blocks that may hold info on current file
+function getSpatialContext(file){
+
+  var ret = "";
+
+  for(const relation in dependencyGraph.get(file).blocks){
+    if(relation != [relations.InstantiatedBy] && relation != [relations.Calledby] && relation != [relation.UsedBy]){
+      for(var i = 0; i < dependencyGraph.get(file).blocks[relation].length; i++){
+        const temp = "File: " + dependencyGraph.get(file).blocks[relation][i][0] + ", Code Block: " + dependencyGraph.get(file).blocks[relation][i][1];
+        ret+="\n" + temp;
+      }
+    }
+  }
+
+  return ret;
+
+}
+
+//format temporal context and return it
+function getTemporalContext(){
+
+  var ret = "";
+
+  for(var i = 0; i < temporalContext.length; i++){
+    ret += temporalContext[i];
+  }
+
+  return ret;
+}
+
+//make a prompt that contains context and the block that needs to be edited
+function constructPrompt(file, oldBlock){
+
+  //get spatial context
+  const spatialContext = getSpatialContext(file);
+  const tempContext = getTemporalContext();
+
+  //make prompt
+  var prompt = `
+  Task: Your task is to analyze the following temporal and spatial context
+  to make an edit on the following C# code. Based on the temporal and spatial
+  context, the code you create must compile. For example, if the parameters of
+  a method are edited in the temporal context, then the calls of that method
+  must have the correct parameter types and amounts.
+
+  Earlier Code Changes (Temporal Context): ${tempContext}
+
+  Related Code (Spatial Context): ${spatialContext}
+
+  Code to be edited:
+  ${oldBlock}
+  `;
+
+  return prompt;
+}
+
+//make the initial edit
+async function seedEdit(file, oldBlock, edit){
+
+  //get spatial context
+  const spatialContext = getSpatialContext(file);
+
+  const intialPrompt = `
+  Task: ${edit}
+
+  Related Code (Spatial Context): ${spatialContext}
+
+  Code to be edited:
+  ${oldBlock}
+  `
+  const newBlock = await wrapper(intialPrompt);
+
+  editFile(file, oldBlock, newBlock);
+  changeMayImpact(file, oldBlock);
+
+  //update temporal context
+  const str = "File that was changed: " + file + "\nCode Block that was changed: " + oldBlock + "\nCode Block after change: " + newBlock + ",\n";
+  temporalContext.push(str);
   
-  // const prompt = "Modify the following C# codeblock to print \"testing\":\n" + oldBlock;
+  //return value to make sure action is 
+  //is completed in main before more code executes
+  return 1;
+}
 
-  // const newBlock = await wrapper(prompt); // Wait for the promise to complete
-  // console.log(oldBlock + "\n\n");
-  // console.log(newBlock.generated_text);
+async function derivedEdit(){
+  const currentBlock = planGraph.dequeue();
 
-  // console.log("\n\n");
-  // editFile('./TestFiles/test2.cs', oldBlock, newBlock.generated_text);
+  const oldBlock = currentBlock[1];
+
+  var newBlock = await wrapper(constructPrompt(currentBlock[0], oldBlock));
+
+  //update temporal context
+  const str = "File that was changed: " + currentBlock[0] + "\nCode Block that was changed: " + oldBlock + "\nCode Block after change: " + newBlock + ",\n";
+  temporalContext.push(str);
+  
+  //make in-file edit
+  editFile(currentBlock[0], oldBlock, newBlock);
+  //update syntax tree and forest
+  updateForest(currentBlock[0]);
+  //update what blocks are significant
+  findSignificantBlocks(forest);
+  //update plan queue
+  changeMayImpact(currentBlock[0], oldBlock);
+  //update depenedncy graph
+  findRelationships(hold);
+
+  //return value to make sure action is 
+  //is completed in main before more code executes
+  return 1;
+}
+
+//Main function
+async function main() {
+  buildForest(rootDirectory);
+  findSignificantBlocks(forest);
+  findRelationships(hold);
+
+  const fileToEdit = `TestFiles\\test2.cs`;//Format: repository\file
+  //the code block that you want to change
+  const blockToEdit = `public static int check(){
+    return 0;
+  }`;
+  //how do you want the above code block to change
+  const editInstruction = `
+  Modify the given C# method to take an int and return that parameter squared
+  `;
+
+ const syncingVar1 = await seedEdit(fileToEdit, blockToEdit, editInstruction);
+
+  updateForest(fileToEdit);
+  findSignificantBlocks(forest);
+  findRelationships(hold);
+
+
+  while(planGraph.length > 0){
+    var syncingVar2 = derivedEdit();
+  }
 }
 
 main();
