@@ -17,6 +17,10 @@ const oPath = "./TestFiles/output.txt";
 
 createASTs(target);
 
+function oldFunction() {
+  console.log('Old function');
+}
+
 function createASTs(folder){
 // Loop through all the files in the directory
     fs.readdir(folder, async function (err, files) {

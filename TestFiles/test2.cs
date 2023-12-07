@@ -7,12 +7,11 @@ using System;
 using System.Collections.Generic;
 
 // Step 6: Inheriting from another class
-
-
-class BaseClass{
-    public int value = 1;
-    public void BaseMethod(){
-        Console.WriteLine("base method");
+class BaseClass
+{
+    public void BaseMethod()
+    {
+        Console.WriteLine("hello");
     }
 }
 
@@ -26,12 +25,15 @@ class DerivedClass : BaseClass
 
 class Program
 {
+    public static int check(){
+        return 0;
+    }
     // Step 3: Invoking a method
     static void Main(string[] args)
     {
         // Step 2: Overriding a method
         DerivedClass derived = new DerivedClass();
-        
+
         derived.BaseMethod(); // Calls overridden method in DerivedClass
 
         // Step 4: Instantiating an object
@@ -44,7 +46,5 @@ class Program
         int x = check();
     }
 
-    public static int check(){
-        return 0;
-    }
+
 }

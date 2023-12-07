@@ -19,7 +19,9 @@ class test1{
         }
 
         public override int getValue(){
+            int x = check();
             return b;
         }
+
     }
 }
