@@ -4,6 +4,14 @@ C# Repo Edit Propagator is a program that allows the user to prompt an LLM to ma
 
 ---
 
+**How to run**
+
+Download this repository. Open it with VS Code, and in the terminal run "npm install". Go to src -> Main.cjs. Near the top of the file, there will be the code block below; put you OpenAI api key here. Once you have done this, you can run the command "node .\src\Main.cjs" in the terminal to run it.
+
+![plot](./mdPictures/apiKeyLocation.jpg)
+
+---
+
 **How to use**
 
 ![plot](./mdPictures/editInstruct.jpg)

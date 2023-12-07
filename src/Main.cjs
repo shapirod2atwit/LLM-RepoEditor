@@ -15,7 +15,7 @@ const { get } = require('http');
 
 //openai api setup
 const openai = new OpenAI({
-    apiKey: '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',
+    apiKey: '',
 });
 
 //parser setup
