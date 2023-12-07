@@ -538,6 +538,9 @@ async function seedEdit(file, oldBlock, edit){
   `
   const newBlock = await wrapper(intialPrompt);
 
+  console.log("Original Block: " + oldBlock);
+  console.log("New Block: " + newBlock + "\n");
+
   editFile(file, oldBlock, newBlock);
   changeMayImpact(file, oldBlock);
 
@@ -560,6 +563,9 @@ async function derivedEdit(){
   //update temporal context
   const str = "File that was changed: " + currentBlock[0] + "\nCode Block that was changed: " + oldBlock + "\nCode Block after change: " + newBlock + ",\n";
   temporalContext.push(str);
+
+  console.log("Original Block: " + oldBlock);
+  console.log("New Block: " + newBlock + "\n");
   
   //make in-file edit
   editFile(currentBlock[0], oldBlock, newBlock);
